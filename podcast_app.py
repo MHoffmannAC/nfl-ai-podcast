@@ -7,6 +7,7 @@ import time
 import re
 import os
 import pickle
+import num2words
 
 # TTS Imports
 from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
@@ -134,8 +135,6 @@ def generate_tts_and_duration(text, speaker_embeddings):
     # Encode to base64
     return combined_speech, total_duration
 
-import re
-
 def split_text_into_chunks(text, max_chars=400):
     """
     Splits a long text into a list of strings, ensuring each chunk is below a certain character limit.
@@ -144,7 +143,6 @@ def split_text_into_chunks(text, max_chars=400):
     sentences = re.split('(?<=[.!?]) +', text)
     chunks = []
     current_chunk = ""
-
     for sentence in sentences:
         if len(current_chunk) + len(sentence) + 1 <= max_chars:
             if current_chunk:
@@ -154,11 +152,42 @@ def split_text_into_chunks(text, max_chars=400):
             if current_chunk:
                 chunks.append(current_chunk)
             current_chunk = sentence
-
     if current_chunk:
         chunks.append(current_chunk)
-
     return chunks
+
+def clean_response(text):
+    """
+    Cleaning:
+       -    Converts all digits in a string to their English word equivalents.
+       -    Removes hyphens/minus from the text.
+       -    Replace NFL by N F L.
+    """
+    
+    # Regex to find all numbers in the text
+    pattern = re.compile(r'-?\d+\.?\d*')
+    matches = pattern.findall(text)
+    for match in matches:
+        try:
+            if '.' in match:
+                number_in_words = num2words.num2words(float(match))
+            else:
+                number_in_words = num2words.num2words(int(match))
+            
+            text = text.replace(match, number_in_words, 1) # Only replace the first instance to handle duplicates
+        except Exception as e:
+            print(f"Could not convert number {match} to words: {e}")
+            pass
+    
+    # Remove hyphens/minus
+    text = text.replace("-", " ")
+    text = text.replace("–", " ") # en-dash
+    text = text.replace("—", " ") # em-dash
+    
+    # Replace NFL with N F L
+    text = re.sub(r'\bNFL\b', 'N F L', text)
+    
+    return text
 
 # --- State Management ---
 if "news_selected" not in st.session_state:
@@ -177,6 +206,8 @@ if "podcast_started" not in st.session_state:
     st.session_state.podcast_started = False
 if "ready_to_start_podcast" not in st.session_state:
     st.session_state.ready_to_start_podcast = False
+if "first_run" not in st.session_state:
+    st.session_state.first_run = True
 
 def reset_app():
     """Resets the application state to the initial news selection screen."""
@@ -188,6 +219,7 @@ def reset_app():
     st.session_state.pre_generated_responses = []
     st.session_state.podcast_started = False
     st.session_state.ready_to_start_podcast = False
+    st.session_state.first_run = True
     st.rerun()
 
 # Initial news selection screen
@@ -202,20 +234,22 @@ if not st.session_state.news_selected:
             placeholder="Choose headlines...",
             help="Select one or more headlines to include in the podcast episode."
         )
-        podcast_length = st.selectbox("Select podcast length:", options=["Short", "Medium", "Long"], index=None, help="Short: 2-3 dialogues per topic, Medium: ~10 dialogues per topic, Long: ~20 dialogues per topic")
+        podcast_length = st.selectbox("Select podcast length:", options=["Teaser", "Short", "Medium", "Long"], index=None, help="Teaser: 2-3 dialogues per topic, Short: ~5 dialogues per topic, Medium: ~10 dialogues per topic, Long: ~20 dialogues per topic")
         groq_token = st.text_input("Enter your Groq API Key:", type="password", help="Get your API key from https://www.groq.com")
-        model_name = st.selectbox("Select LLM Model:", options=["gemma2-9b-it", "llama-3.3-70b-versatile", "openai/gpt-oss-120b", "qwen/qwen3-32b"], index=None, help="Choose the large language model for dialogue generation.")
+        model_name = st.selectbox("Select LLM Model:", options=["gemma2-9b-it", "llama-3.3-70b-versatile", "qwen/qwen3-32b"], index=None, help="Choose the large language model for dialogue generation.")
     
         if st.button("Generate Podcast Episode"):
-            if selected_headlines and groq_token and podcast_length:
-                podcast_length = {"Short": 1, "Medium": 5, "Long": 10}[podcast_length]
-                df = pd.DataFrame([
-                    {"news_id": headline_to_id[h], "headline": h, "story": headline_to_story[h]}
-                    for h in selected_headlines
-                ])
-                st.session_state.selected_news = df
-                
-                with st.spinner("Generating podcast episode... This may take a moment."):
+            try:
+                if selected_headlines and groq_token and podcast_length:
+                    podcast_length = {"Teaser": 1, "Short": 2, "Medium": 5, "Long": 10}[podcast_length]
+                    df = pd.DataFrame([
+                        {"news_id": headline_to_id[h], "headline": h, "story": headline_to_story[h]}
+                        for h in selected_headlines
+                    ])
+                    st.session_state.selected_news = df
+                    
+                    progress_bar = st.progress(0)
+
                     news_df = st.session_state.selected_news
 
                     llm = Groq(model=model_name, api_key=groq_token)
@@ -241,65 +275,73 @@ if not st.session_state.news_selected:
                     all_audio_segments.append(silent_segment)
                     
                     while st.session_state.news_topic_index < news_df.shape[0]: # Generate a few responses per topic
-                        print(f"Generating for topic index {st.session_state.news_topic_index}, message count {st.session_state.topic_messages_count}, speeker {current_turn}")
-                        if current_turn == "dave":
-                            next_bot = True
-                            current_news = news_df.iloc[st.session_state.news_topic_index]
-                            
-                            # Dynamically add the news story context to the prompt for the first message of a new topic
-                            if st.session_state.topic_messages_count == 0:
-                                if st.session_state.news_topic_index == 0:
-                                    prompt = f"Welcome everyone to the 'Neural Zone Infraction' NFL Podcast. Include the tagline 'Breaking down the week in football, at machine speed.'. Introduce yourself as well as your co-host 'Julia'. Introduce then the first news story of the day: '{current_news['headline']}'. The story is: '{current_news['story']}'. Provide your initial thoughts."
+                        with st.spinner("Generating podcast episode... This may take a moment."):
+                            print(f"Generating for topic index {st.session_state.news_topic_index}, message count {st.session_state.topic_messages_count}, speeker {current_turn}")
+                            if current_turn == "dave":
+                                next_bot = True
+                                current_news = news_df.iloc[st.session_state.news_topic_index]
+                                
+                                # Dynamically add the news story context to the prompt for the first message of a new topic
+                                if st.session_state.topic_messages_count == 0:
+                                    if st.session_state.news_topic_index == 0:
+                                        prompt = f"Welcome everyone to the 'Neural Zone Infraction' NFL Podcast. Include the tagline 'Breaking down the week in football, at machine speed.'. Introduce yourself as well as your co-host 'Julia'. Introduce then the first news story of the day: '{current_news['headline']}'. The story is: '{current_news['story']}'. Provide your initial thoughts."
+                                    else:
+                                        prompt = f"Introduce the next news story: '{current_news['headline']}'. The story is: '{current_news['story']}'. Provide your initial thoughts."
+                                # If enough messages have been exchanged on this topic, move to the next one or wrap up
+                                elif st.session_state.topic_messages_count >= 2*podcast_length:
+                                    if st.session_state.news_topic_index + 1 < news_df.shape[0]:
+                                        prompt = f"Summarize the current news story '{current_news['headline']}' and provide a closing remark. Then transition to the next news story with the sentence: 'Alright, let's move on to the next big story...'"
+                                    else: # Last news story, so just wrap up
+                                        prompt = f"Summarize the current news story '{current_news['headline']}' and provide a closing remark to end the podcast episode."
+                                    st.session_state.news_topic_index += 1
+                                    st.session_state.topic_messages_count = -1
+                                    next_bot = False
                                 else:
-                                    prompt = f"Introduce the next news story: '{current_news['headline']}'. The story is: '{current_news['story']}'. Provide your initial thoughts."
-                            # If enough messages have been exchanged on this topic, move to the next one or wrap up
-                            elif st.session_state.topic_messages_count >= 2*podcast_length:
-                                if st.session_state.news_topic_index + 1 < news_df.shape[0]:
-                                    prompt = f"Summarize the current news story '{current_news['headline']}' and provide a closing remark. Then transition to the next news story with the sentence: 'Alright, let's move on to the next big story...'"
-                                else: # Last news story, so just wrap up
-                                    prompt = f"Summarize the current news story '{current_news['headline']}' and provide a closing remark to end the podcast episode."
-                                st.session_state.news_topic_index += 1
-                                st.session_state.topic_messages_count = -1
-                                next_bot = False
-                            else:
-                                prompt = f"Your co-host Julia just said: '{current_message_content}'. Respond to his point, but also tie it back to the main news story or a related point. Don't just acknowledge his joke."
+                                    prompt = f"Your co-host Julia just said: '{current_message_content}'. Respond to his point, but also tie it back to the main news story or a related point. Don't just acknowledge his joke."
 
-                            response = dave_engine.chat(prompt)
-                            audio_data, duration = generate_tts_and_duration(response.response, speaker_embeddings["Dave"])
-                            all_audio_segments.append(audio_data)
-                            st.session_state.pre_generated_responses.append({'response': response.response, 'duration': duration, 'speaker_id': "Dave"})
-                            current_message_content = response.response
-                            if next_bot:
-                                current_turn = "julia"
+                                response = dave_engine.chat(prompt)
+                                cleaned_response = clean_response(response.response)
+                                audio_data, duration = generate_tts_and_duration(cleaned_response, speaker_embeddings["Dave"])
+                                all_audio_segments.append(audio_data)
+                                st.session_state.pre_generated_responses.append({'response': response.response, 'duration': duration, 'speaker_id': "Dave"})
+                                current_message_content = response.response
+                                if next_bot:
+                                    current_turn = "julia"
 
-                        elif current_turn == "julia":
-                            prompt = f"Your co-host Dave just said: '{current_message_content}'. React to his analysis with a lighthearted or ironic take. Keep it brief and then ask him a question to get his his thoughts on your point."
-                            response = julia_engine.chat(prompt)
-                            audio_data, duration = generate_tts_and_duration(response.response, speaker_embeddings["Julia"])
-                            all_audio_segments.append(audio_data)
-                            st.session_state.pre_generated_responses.append({'response': response.response, 'duration': duration, 'speaker_id': "Julia"})
-                            current_message_content = response.response
-                            current_turn = "dave"
+                            elif current_turn == "julia":
+                                prompt = f"Your co-host Dave just said: '{current_message_content}'. React to his analysis with a lighthearted or ironic take. Keep it brief and then ask him a question to get his his thoughts on your point."
+                                response = julia_engine.chat(prompt)
+                                cleaned_response = clean_response(response.response)
+                                audio_data, duration = generate_tts_and_duration(cleaned_response, speaker_embeddings["Julia"])
+                                all_audio_segments.append(audio_data)
+                                st.session_state.pre_generated_responses.append({'response': response.response, 'duration': duration, 'speaker_id': "Julia"})
+                                current_message_content = response.response
+                                current_turn = "dave"
 
+                        progress = (st.session_state.news_topic_index * 2 * podcast_length + st.session_state.topic_messages_count) / (news_df.shape[0] * 2 * podcast_length)
+                        progress_bar.progress(progress)
                         st.session_state.topic_messages_count += 1
+                            
+                        combined_audio_numpy = np.concatenate(all_audio_segments)
+                        # Save the combined audio to a BytesIO object in memory
+                        wav_io = io.BytesIO()
+                        sf.write(wav_io, combined_audio_numpy, samplerate=16000, format="WAV")
+                        wav_io.seek(0)
                         
-                    combined_audio_numpy = np.concatenate(all_audio_segments)
-                    # Save the combined audio to a BytesIO object in memory
-                    wav_io = io.BytesIO()
-                    sf.write(wav_io, combined_audio_numpy, samplerate=16000, format="WAV")
-                    wav_io.seek(0)
-                    
-                    # Encode the final combined audio to base64
-                    audio_base64 = base64.b64encode(wav_io.read()).decode('utf-8')
-                    st.session_state.combined_audio_b64 = audio_base64
-                    
-                st.session_state.news_selected = True
-                st.session_state.ready_to_start_podcast = True
-                st.session_state.dave_engine = dave_engine
-                st.session_state.julia_engine = julia_engine
-                st.rerun()
-            else:
-                st.warning("Please choose all settings and select at least one headline.")
+                        # Encode the final combined audio to base64
+                        audio_base64 = base64.b64encode(wav_io.read()).decode('utf-8')
+                        st.session_state.combined_audio_b64 = audio_base64
+                        
+                    st.session_state.news_selected = True
+                    st.session_state.ready_to_start_podcast = True
+                    st.session_state.dave_engine = dave_engine
+                    st.session_state.julia_engine = julia_engine
+                    st.rerun()
+                else:
+                    st.warning("Please choose all settings and select at least one headline.")
+            except Exception as e:
+                st.error(f"An error occurred during podcast generation. Please try again.")
+                reset_app()
     with col_load:
         st.header("Load Old Episode")
         save_dir = "prerecorded_episodes"
@@ -360,10 +402,12 @@ else:
             st.session_state.messages.append({"role": speaker_id, "content": response, "avatar": avatar})
             
             # Wait for the duration of this specific audio segment before showing the next message
-            time.sleep(duration + 1) # Adding a 1-second pause between speakers
+            if st.session_state.first_run:
+                time.sleep(duration + 1) # Adding a 1-second pause between speakers
 
         # Once the loop is finished, the podcast is over
         st.divider()
+        st.session_state.first_run = False
         st.info("The hosts have covered all the news topics for today's show. You can save the current episode or start a new episode below.")
 
         col1, col2 = st.columns([1,2], gap="large")

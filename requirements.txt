@@ -9,3 +9,5 @@ llama-index-llms-groq
 sqlalchemy
 pymysql
 sentencepiece
+pickle
+num2words
