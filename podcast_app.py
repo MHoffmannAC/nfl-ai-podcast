@@ -24,8 +24,8 @@ from llama_index.core.base.llms.types import ChatMessage, MessageRole
 from sqlalchemy import create_engine, text
 
 # --- Configuration and Setup ---
-st.set_page_config(page_title="The OldLows NFL Podcast")
-st.title("The OldLows NFL Podcast")
+st.set_page_config(page_title="The 'Neural Zone infraction' NFL Podcast")
+st.title("The 'Neural Zone infraction' NFL Podcast")
 st.markdown("Listen to our AI co-hosts Dave and Julia discuss the latest NFL news!")
 
 
@@ -165,7 +165,7 @@ def reset_app():
 # Initial news selection screen
 if not st.session_state.news_selected:
     selected_headlines = st.multiselect(
-        "Select news articles:",
+        "Select the news article(s) covered in this episode:",
         options=[i['headline'] for i in news],
         placeholder="Choose headlines..."
     )
@@ -214,7 +214,7 @@ if not st.session_state.news_selected:
                         # Dynamically add the news story context to the prompt for the first message of a new topic
                         if st.session_state.topic_messages_count == 0:
                             if st.session_state.news_topic_index == 0:
-                                prompt = f"Welcome everyone to the OldLows NFL Podcast. Introduce yourself as well as your co-host 'Julia'. Introduce then the first news story of the day: '{current_news['headline']}'. The story is: '{current_news['story']}'. Provide your initial thoughts."
+                                prompt = f"Welcome everyone to the 'Neural Zone Infraction' NFL Podcast. Include the tagline 'Breaking down the week in football, at machine speed.'. Introduce yourself as well as your co-host 'Julia'. Introduce then the first news story of the day: '{current_news['headline']}'. The story is: '{current_news['story']}'. Provide your initial thoughts."
                             else:
                                 prompt = f"Introduce the next news story: '{current_news['headline']}'. The story is: '{current_news['story']}'. Provide your initial thoughts."
                         elif st.session_state.topic_messages_count >= 2*podcast_length:
@@ -300,8 +300,8 @@ else:
         st.info("The hosts have covered all the news topics for today's show. You can start a new episode below.")
         
         user_filename_input = st.text_input(
-            label="Enter a filename for the podcast:",
-            value="oldlows_nfl_podcast"
+            label="Enter a name for the podcast:",
+            value=None
         )
 
         # Sanitize and Validate the filename

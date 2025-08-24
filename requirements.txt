@@ -6,3 +6,6 @@ torch
 soundfile
 llama-index-core
 llama-index-llms-groq
+sqlalchemy
+pymysql
+sentencepiece
