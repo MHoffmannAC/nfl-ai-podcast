@@ -1,7 +1,7 @@
 streamlit
 pandas
 transformers
-datasets
+datasets==4.0.0
 torch
 soundfile
 llama-index-core
