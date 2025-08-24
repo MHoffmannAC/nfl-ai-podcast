@@ -1,0 +1,8 @@
+streamlit
+pandas
+transformers
+datasets
+torch
+soundfile
+llama-index-core
+llama-index-llms-groq
