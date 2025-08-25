@@ -236,7 +236,7 @@ if not st.session_state.news_selected:
         )
         podcast_length = st.selectbox("Select podcast length:", options=["Teaser", "Short", "Medium", "Long"], index=None, help="Teaser: 2-3 dialogues per topic, Short: ~5 dialogues per topic, Medium: ~10 dialogues per topic, Long: ~20 dialogues per topic")
         groq_token = st.text_input("Enter your Groq API Key:", type="password", help="Get your API key from https://www.groq.com")
-        model_name = st.selectbox("Select LLM Model:", options=["gemma2-9b-it", "llama-3.3-70b-versatile", "qwen/qwen3-32b"], index=None, help="Choose the large language model for dialogue generation.")
+        model_name = st.selectbox("Select LLM Model:", options=["gemma2-9b-it", "llama-3.3-70b-versatile"], index=None, help="Choose the large language model for dialogue generation.")
     
         if st.button("Generate Podcast Episode"):
             try:
@@ -290,14 +290,14 @@ if not st.session_state.news_selected:
                                 # If enough messages have been exchanged on this topic, move to the next one or wrap up
                                 elif st.session_state.topic_messages_count >= 2*podcast_length:
                                     if st.session_state.news_topic_index + 1 < news_df.shape[0]:
-                                        prompt = f"Summarize the current news story '{current_news['headline']}' and provide a closing remark. Then transition to the next news story with the sentence: 'Alright, let's move on to the next big story...'"
+                                        prompt = f"Respond to your co-host Julia's last message briefly without adding more context: '{current_message_content}'. Summarize then the current news story '{current_news['headline']}' and provide a closing remark. Then transition to the next news story with the sentence: 'Alright, let's move on to the next big story...'"
                                     else: # Last news story, so just wrap up
-                                        prompt = f"Summarize the current news story '{current_news['headline']}' and provide a closing remark to end the podcast episode."
+                                        prompt = f"Respond to your co-host Julia's last message briefly without adding more context: '{current_message_content}'. Summarize then Summarize the current news story '{current_news['headline']}' and provide a closing remark to end the podcast episode."
                                     st.session_state.news_topic_index += 1
                                     st.session_state.topic_messages_count = -1
                                     next_bot = False
                                 else:
-                                    prompt = f"Your co-host Julia just said: '{current_message_content}'. Respond to his point, but also tie it back to the main news story or a related point. Don't just acknowledge his joke."
+                                    prompt = f"Your co-host Julia just said: '{current_message_content}'. Respond to her point, but also tie it back to the main news story or a related point. Don't just acknowledge her joke."
 
                                 response = dave_engine.chat(prompt)
                                 cleaned_response = clean_response(response.response)
@@ -376,13 +376,17 @@ else:
     # Wait for the user to press the start button
     if st.session_state.ready_to_start_podcast and not st.session_state.podcast_started:
         st.info("Podcast episode ready to play. Click 'Start Podcast' to begin listening.")
-        if st.button("Start Podcast"):
-            st.session_state.podcast_started = True
-            # We don't need a rerun here, the script will continue execution
+        cols = st.columns(2)
+        with cols[0]:
+            if st.button("Start Podcast"):
+                st.session_state.podcast_started = True
+                st.rerun()
+        with cols[1]:
+            if st.toggle("Show full Transcript", value=False, key="show_transcript_toggle"):
+                st.session_state.first_run = False
+                st.rerun()
 
-    # This block will execute once the "Start Podcast" button is clicked
     if st.session_state.podcast_started:
-        # Play the single, combined audio file
         time.sleep(1)
         st.audio(io.BytesIO(base64.b64decode(st.session_state.combined_audio_b64)), format='audio/wav', autoplay=True)
         time.sleep(1)
