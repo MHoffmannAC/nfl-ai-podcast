@@ -343,7 +343,7 @@ if not st.session_state.news_selected:
                 st.error(f"An error occurred during podcast generation. Please try again.")
                 reset_app()
     with col_load:
-        st.header("Load Old Episode")
+        st.header("Load Pre-recorded Episode")
         save_dir = "prerecorded_episodes"
         # Ensure the directory exists to prevent errors
         os.makedirs(save_dir, exist_ok=True)
@@ -356,7 +356,7 @@ if not st.session_state.news_selected:
         else:
             selected_episode_file = st.selectbox("Select an episode to load:", options=episode_files, index=None)
             
-            if st.button("Load Old Episode"):
+            if st.button("Load Episode"):
                 if selected_episode_file:
                     file_path = os.path.join(save_dir, selected_episode_file)
                     
@@ -367,6 +367,8 @@ if not st.session_state.news_selected:
                     st.session_state.pre_generated_responses = episode_data["pre_generated_responses"]
                     st.session_state.news_selected = True
                     st.session_state.ready_to_start_podcast = True
+                    st.session_state.first_run = False
+                    st.session_state.podcast_started = True
                     st.rerun()
                 else:
                     st.warning("Please select an episode to load.")
