@@ -58,7 +58,7 @@ st.html("""
 st.title("The 'Neural Zone infraction' NFL Podcast")
 st.markdown("Listen to our AI co-hosts Dave and Julia discuss the latest NFL news!")
 
-@st.cache_data
+@st.cache_data(show_spinner="Fetching the latest NFL news...")
 def get_news():
     """Fetches the latest NFL news from the database."""
     def query_db(_sql_engine, query, **params):
@@ -85,7 +85,7 @@ headline_to_story = {i["headline"]: i["story"] for i in news}
 headline_to_id = {i["headline"]: i["news_id"] for i in news}
 
 # --- TTS Model and Embeddings Setup ---
-@st.cache_resource
+@st.cache_resource(show_spinner="Let Dave and Julia's voices warm up...")
 def load_tts_models():
     """Load and cache the TTS models and vocoder."""
     processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
@@ -93,7 +93,7 @@ def load_tts_models():
     vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
     return processor, model, vocoder
 
-@st.cache_resource
+@st.cache_resource(show_spinner="Let Dave and Julia's voices warm up...")
 def load_speaker_embeddings():
     """Load and cache the speaker embeddings for the hosts."""
     embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
