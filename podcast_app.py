@@ -26,7 +26,7 @@ from llama_index.core.base.llms.types import ChatMessage, MessageRole
 from sqlalchemy import create_engine, text
 
 # --- Configuration and Setup ---
-st.set_page_config(page_title="The 'Neural Zone infraction' NFL Podcast")
+st.set_page_config(page_title="Neural Zone Infraction")
 st.html("""
     <style>
         /* General chat message bubble style */
@@ -55,7 +55,7 @@ st.html("""
     </style>
 """)
 
-st.title("The 'Neural Zone infraction' NFL Podcast")
+st.title("The 'Neural Zone Infraction' NFL Podcast")
 st.markdown("Listen to our AI co-hosts Dave and Julia discuss the latest NFL news!")
 
 @st.cache_data(show_spinner="Fetching the latest NFL news...")
