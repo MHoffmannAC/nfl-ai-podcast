@@ -451,18 +451,25 @@ else:
                     mime="audio/wav"
                 )
 
+            if "episode_saved" not in st.session_state:
+                st.session_state["episode_saved"] = False
+            if "episode_path" not in st.session_state:
+                st.session_state["episode_path"] = ""
             # Action 2: Save the file to the server's filesystem
             if not sanitized_filename:
+                st.session_state["episode_saved"] = False
                 st.button("💾 Publish Episode to Server", disabled=True)
             else:
                 if st.button("💾 Publish Episode to Server"):
+                    st.session_state["episode_saved"] = True
                     save_dir = "prerecorded_episodes"
                     # Create the directory if it doesn't exist
                     os.makedirs(save_dir, exist_ok=True)
                     
                     final_filename = f"{sanitized_filename}"
                     file_path = os.path.join(save_dir, final_filename)
-                    
+                    st.session_state["episode_path"] = file_path
+
                     episode_data = {
                             "combined_audio_b64": st.session_state.combined_audio_b64,
                             "pre_generated_responses": st.session_state.pre_generated_responses
@@ -471,5 +478,10 @@ else:
                     with open(file_path, "wb") as f:
                         pickle.dump(episode_data, f)
                     st.success(f"Saved episode data to: {file_path}")
-
-
+            if st.session_state["episode_saved"]:
+                with open(st.session_state["episode_path"], "rb") as f:
+                    st.download_button(
+                        label="📥 Download Pickle File",
+                        data=f,
+                        file_name=os.path.basename(st.session_state["episode_path"]),
+                    )
