@@ -58,7 +58,70 @@ st.html("""
 st.title("The 'Neural Zone Infraction' NFL Podcast")
 st.markdown("Listen to our AI co-hosts Dave and Julia discuss the latest NFL news!")
 
-@st.cache_data(show_spinner="Fetching the latest NFL news...")
+@st.fragment
+def display_save_options():
+    user_filename_input = st.text_input(
+        label="Enter a name for the podcast:",
+        value=None,
+        max_chars=50,
+        placeholder="e.g., nfl_podcast_aug_24_2025"
+    )
+
+    # Sanitize and Validate the filename
+    if user_filename_input:
+        sanitized_filename = user_filename_input.replace(' ', '_')
+        sanitized_filename = re.sub(r'[^\w]', '', sanitized_filename)
+    else:
+        sanitized_filename = ""
+
+    # Action 1: Download the file to the user's local machine
+    if not sanitized_filename:
+        st.download_button("📥 Download Audio", data=b"", disabled=True)
+    else:
+        final_filename = f"{sanitized_filename}.wav"
+        audio_bytes = base64.b64decode(st.session_state.combined_audio_b64)
+        st.download_button(
+            label="📥 Download Audio",
+            data=audio_bytes,
+            file_name=final_filename,
+            mime="audio/wav"
+        )
+
+    if "episode_saved" not in st.session_state:
+        st.session_state["episode_saved"] = False
+    if "episode_path" not in st.session_state:
+        st.session_state["episode_path"] = ""
+    # Action 2: Save the file to the server's filesystem
+    if not sanitized_filename:
+        st.session_state["episode_saved"] = False
+        st.button("💾 Publish Episode to Server", disabled=True)
+    else:
+        if st.button("💾 Publish Episode to Server"):
+            st.session_state["episode_saved"] = True
+            save_dir = "prerecorded_episodes"
+            # Create the directory if it doesn't exist
+            os.makedirs(save_dir, exist_ok=True)
+            
+            final_filename = f"{sanitized_filename}"
+            file_path = os.path.join(save_dir, final_filename)
+            st.session_state["episode_path"] = file_path
+
+            episode_data = {
+                    "combined_audio_b64": st.session_state.combined_audio_b64,
+                    "pre_generated_responses": st.session_state.pre_generated_responses
+                }
+                
+            with open(file_path, "wb") as f:
+                pickle.dump(episode_data, f)
+            st.success(f"Saved episode data to: {file_path}")
+    if st.session_state["episode_saved"]:
+        with open(st.session_state["episode_path"], "rb") as f:
+            st.download_button(
+                label="📥 Download Pickle File",
+                data=f,
+                file_name=os.path.basename(st.session_state["episode_path"]),
+            )
+
 def get_news():
     """Fetches the latest NFL news from the database."""
     def query_db(_sql_engine, query, **params):
@@ -208,6 +271,8 @@ if "ready_to_start_podcast" not in st.session_state:
     st.session_state.ready_to_start_podcast = False
 if "first_run" not in st.session_state:
     st.session_state.first_run = True
+if "generate_audio" not in st.session_state:
+    st.session_state.generate_audio = False
 
 def reset_app():
     """Resets the application state to the initial news selection screen."""
@@ -220,6 +285,7 @@ def reset_app():
     st.session_state.podcast_started = False
     st.session_state.ready_to_start_podcast = False
     st.session_state.first_run = True
+    st.session_state.generate_audio = False
     st.rerun()
 
 # Initial news selection screen
@@ -227,18 +293,22 @@ if not st.session_state.news_selected:
     col_settings, col_load = st.columns(2, gap="large")
 
     with col_settings:
-        st.header("Generate New Episode")
-        selected_headlines = st.multiselect(
-            "Select the news article(s) covered in this episode:",
-            options=[i['headline'] for i in news],
-            placeholder="Choose headlines...",
-            help="Select one or more headlines to include in the podcast episode."
-        )
-        podcast_length = st.selectbox("Select podcast length:", options=["Teaser", "Short", "Medium", "Long"], index=None, help="Teaser: 2-3 dialogues per topic, Short: ~5 dialogues per topic, Medium: ~10 dialogues per topic, Long: ~20 dialogues per topic")
-        groq_token = st.text_input("Enter your Groq API Key:", type="password", help="Get your API key from https://www.groq.com")
-        model_name = st.selectbox("Select LLM Model:", options=["gemma2-9b-it", "llama-3.3-70b-versatile"], index=None, help="Choose the large language model for dialogue generation.")
+        with st.form("generate_episode_form"):
+            st.header("Generate New Episode")
+            selected_headlines = st.multiselect(
+                "Select the news article(s) covered in this episode:",
+                options=[i['headline'] for i in news],
+                placeholder="Choose headlines...",
+                help="Select one or more headlines to include in the podcast episode."
+            )
+            podcast_length = st.selectbox("Select podcast length:", options=["Teaser", "Short", "Medium", "Long"], index=None, help="Teaser: 2-3 dialogues per topic, Short: ~5 dialogues per topic, Medium: ~10 dialogues per topic, Long: ~20 dialogues per topic")
+            generate_audio = st.checkbox("Generate Audio for Podcast Episode", value=st.session_state.generate_audio, help="Check this box to generate audio using TTS for the podcast episode.")
+            groq_token = st.text_input("Enter your Groq API Key:", type="password", help="Get your API key from https://www.groq.com")
+            model_name = st.selectbox("Select LLM Model:", options=["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"], index=None, help="Choose the large language model for dialogue generation.")
+        
+            submitted = st.form_submit_button("Generate Podcast Episode")
     
-        if st.button("Generate Podcast Episode"):
+        if submitted:
             try:
                 if selected_headlines and groq_token and podcast_length:
                     podcast_length = {"Teaser": 1, "Short": 2, "Medium": 5, "Long": 10}[podcast_length]
@@ -270,9 +340,11 @@ if not st.session_state.news_selected:
                     # Pre-generate responses
                     current_turn = "dave"
                     current_message_content = ""
-                    all_audio_segments = []
-                    silent_segment = np.zeros(16000, dtype=np.float32) # 16000 samples for 1 second at 16kHz
-                    all_audio_segments.append(silent_segment)
+                    if generate_audio:
+                        st.session_state.generate_audio = True
+                        all_audio_segments = []
+                        silent_segment = np.zeros(16000, dtype=np.float32) # 16000 samples for 1 second at 16kHz
+                        all_audio_segments.append(silent_segment)
                     
                     while st.session_state.news_topic_index < news_df.shape[0]: # Generate a few responses per topic
                         with st.spinner("Generating podcast episode... This may take a moment."):
@@ -301,8 +373,11 @@ if not st.session_state.news_selected:
 
                                 response = dave_engine.chat(prompt)
                                 cleaned_response = clean_response(response.response)
-                                audio_data, duration = generate_tts_and_duration(cleaned_response, speaker_embeddings["Dave"])
-                                all_audio_segments.append(audio_data)
+                                if generate_audio:
+                                    audio_data, duration = generate_tts_and_duration(cleaned_response, speaker_embeddings["Dave"])
+                                    all_audio_segments.append(audio_data)
+                                else:
+                                    duration = 0.0
                                 st.session_state.pre_generated_responses.append({'response': response.response, 'duration': duration, 'speaker_id': "Dave"})
                                 current_message_content = response.response
                                 if next_bot:
@@ -312,8 +387,11 @@ if not st.session_state.news_selected:
                                 prompt = f"Your co-host Dave just said: '{current_message_content}'. React to his analysis with a lighthearted or ironic take. Keep it brief and then ask him a question to get his his thoughts on your point."
                                 response = julia_engine.chat(prompt)
                                 cleaned_response = clean_response(response.response)
-                                audio_data, duration = generate_tts_and_duration(cleaned_response, speaker_embeddings["Julia"])
-                                all_audio_segments.append(audio_data)
+                                if generate_audio:
+                                    audio_data, duration = generate_tts_and_duration(cleaned_response, speaker_embeddings["Julia"])
+                                    all_audio_segments.append(audio_data)
+                                else:
+                                    duration = 0.0
                                 st.session_state.pre_generated_responses.append({'response': response.response, 'duration': duration, 'speaker_id': "Julia"})
                                 current_message_content = response.response
                                 current_turn = "dave"
@@ -321,16 +399,19 @@ if not st.session_state.news_selected:
                         progress = (st.session_state.news_topic_index * 2 * podcast_length + st.session_state.topic_messages_count) / (news_df.shape[0] * 2 * podcast_length)
                         progress_bar.progress(progress)
                         st.session_state.topic_messages_count += 1
-                            
-                        combined_audio_numpy = np.concatenate(all_audio_segments)
-                        # Save the combined audio to a BytesIO object in memory
-                        wav_io = io.BytesIO()
-                        sf.write(wav_io, combined_audio_numpy, samplerate=16000, format="WAV")
-                        wav_io.seek(0)
                         
-                        # Encode the final combined audio to base64
-                        audio_base64 = base64.b64encode(wav_io.read()).decode('utf-8')
-                        st.session_state.combined_audio_b64 = audio_base64
+                        if generate_audio:
+                            combined_audio_numpy = np.concatenate(all_audio_segments)
+                            # Save the combined audio to a BytesIO object in memory
+                            wav_io = io.BytesIO()
+                            sf.write(wav_io, combined_audio_numpy, samplerate=16000, format="WAV")
+                            wav_io.seek(0)
+                            
+                            # Encode the final combined audio to base64
+                            audio_base64 = base64.b64encode(wav_io.read()).decode('utf-8')
+                            st.session_state.combined_audio_b64 = audio_base64
+                        else:
+                            st.session_state.combined_audio_b64 = ""
                         
                     st.session_state.news_selected = True
                     st.session_state.ready_to_start_podcast = True
@@ -341,9 +422,9 @@ if not st.session_state.news_selected:
                     st.warning("Please choose all settings and select at least one headline.")
             except Exception as e:
                 st.error(f"An error occurred during podcast generation. Please try again.")
+                print(e)
                 reset_app()
     with col_load:
-        st.header("Load Pre-recorded Episode")
         save_dir = "prerecorded_episodes"
         # Ensure the directory exists to prevent errors
         os.makedirs(save_dir, exist_ok=True)
@@ -354,9 +435,13 @@ if not st.session_state.news_selected:
         if not episode_files:
             st.info("No prerecorded episodes found.")
         else:
-            selected_episode_file = st.selectbox("Select an episode to load:", options=episode_files, index=None)
+            with st.form("load_episode_form"):
+                st.header("Load Pre-recorded Episode")
+                selected_episode_file = st.selectbox("Select an episode to load:", options=episode_files, index=None)
+
+                submitted_load = st.form_submit_button("Load Episode")
             
-            if st.button("Load Episode"):
+            if submitted_load:
                 if selected_episode_file:
                     file_path = os.path.join(save_dir, selected_episode_file)
                     
@@ -369,6 +454,8 @@ if not st.session_state.news_selected:
                     st.session_state.ready_to_start_podcast = True
                     st.session_state.first_run = False
                     st.session_state.podcast_started = True
+                    if st.session_state.combined_audio_b64:
+                        st.session_state.generate_audio = True
                     st.rerun()
                 else:
                     st.warning("Please select an episode to load.")
@@ -377,21 +464,25 @@ else:
 
     # Wait for the user to press the start button
     if st.session_state.ready_to_start_podcast and not st.session_state.podcast_started:
-        st.info("Podcast episode ready to play. Click 'Start Podcast' to begin listening.")
-        cols = st.columns(2)
-        with cols[0]:
-            if st.button("Start Podcast"):
-                st.session_state.podcast_started = True
-                st.rerun()
-        with cols[1]:
-            if st.toggle("Show full Transcript", value=False, key="show_transcript_toggle"):
-                st.session_state.first_run = False
-                st.rerun()
+        if not st.session_state.generate_audio:
+            st.session_state.podcast_started = True
+        else:
+            st.info("Podcast episode ready to play. Click 'Start Podcast' to begin listening.")
+            cols = st.columns(2)
+            with cols[0]:
+                if st.button("Start Podcast"):
+                    st.session_state.podcast_started = True
+                    st.rerun()
+            with cols[1]:
+                if st.toggle("Show full Transcript", value=False, key="show_transcript_toggle"):
+                    st.session_state.first_run = False
+                    st.rerun()
 
     if st.session_state.podcast_started:
-        time.sleep(1)
-        st.audio(io.BytesIO(base64.b64decode(st.session_state.combined_audio_b64)), format='audio/wav', autoplay=True)
-        time.sleep(1)
+        if st.session_state.generate_audio and st.session_state.combined_audio_b64:
+            time.sleep(1)
+            st.audio(io.BytesIO(base64.b64decode(st.session_state.combined_audio_b64)), format='audio/wav', autoplay=True)
+            time.sleep(1)
         # Loop through the pre-generated responses and display them sequentially
         for idx, response_data in enumerate(st.session_state.pre_generated_responses):
             response = response_data['response']
@@ -424,64 +515,4 @@ else:
                 reset_app()
 
         with col2:
-            user_filename_input = st.text_input(
-                label="Enter a name for the podcast:",
-                value=None,
-                max_chars=50,
-                placeholder="e.g., nfl_podcast_aug_24_2025"
-            )
-
-            # Sanitize and Validate the filename
-            if user_filename_input:
-                sanitized_filename = user_filename_input.replace(' ', '_')
-                sanitized_filename = re.sub(r'[^\w]', '', sanitized_filename)
-            else:
-                sanitized_filename = ""
-
-            # Action 1: Download the file to the user's local machine
-            if not sanitized_filename:
-                st.download_button("📥 Download Audio", data=b"", disabled=True)
-            else:
-                final_filename = f"{sanitized_filename}.wav"
-                audio_bytes = base64.b64decode(st.session_state.combined_audio_b64)
-                st.download_button(
-                    label="📥 Download Audio",
-                    data=audio_bytes,
-                    file_name=final_filename,
-                    mime="audio/wav"
-                )
-
-            if "episode_saved" not in st.session_state:
-                st.session_state["episode_saved"] = False
-            if "episode_path" not in st.session_state:
-                st.session_state["episode_path"] = ""
-            # Action 2: Save the file to the server's filesystem
-            if not sanitized_filename:
-                st.session_state["episode_saved"] = False
-                st.button("💾 Publish Episode to Server", disabled=True)
-            else:
-                if st.button("💾 Publish Episode to Server"):
-                    st.session_state["episode_saved"] = True
-                    save_dir = "prerecorded_episodes"
-                    # Create the directory if it doesn't exist
-                    os.makedirs(save_dir, exist_ok=True)
-                    
-                    final_filename = f"{sanitized_filename}"
-                    file_path = os.path.join(save_dir, final_filename)
-                    st.session_state["episode_path"] = file_path
-
-                    episode_data = {
-                            "combined_audio_b64": st.session_state.combined_audio_b64,
-                            "pre_generated_responses": st.session_state.pre_generated_responses
-                        }
-                        
-                    with open(file_path, "wb") as f:
-                        pickle.dump(episode_data, f)
-                    st.success(f"Saved episode data to: {file_path}")
-            if st.session_state["episode_saved"]:
-                with open(st.session_state["episode_path"], "rb") as f:
-                    st.download_button(
-                        label="📥 Download Pickle File",
-                        data=f,
-                        file_name=os.path.basename(st.session_state["episode_path"]),
-                    )
+            display_save_options()
