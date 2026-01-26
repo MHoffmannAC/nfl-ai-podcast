@@ -304,7 +304,7 @@ if not st.session_state.news_selected:
             podcast_length = st.selectbox("Select podcast length:", options=["Teaser", "Short", "Medium", "Long"], index=None, help="Teaser: 2-3 dialogues per topic, Short: ~5 dialogues per topic, Medium: ~10 dialogues per topic, Long: ~20 dialogues per topic")
             generate_audio = st.checkbox("Generate Audio for Podcast Episode", value=st.session_state.generate_audio, help="Check this box to generate audio using TTS for the podcast episode.")
             groq_token = st.text_input("Enter your Groq API Key:", type="password", help="Get your API key from https://www.groq.com")
-            model_name = st.selectbox("Select LLM Model:", options=["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"], index=None, help="Choose the large language model for dialogue generation.")
+            model_name = st.selectbox("Select LLM Model:", options=["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-120b", "meta-llama/llama-4-maverick-17b-128e-instruct"], index=None, help="Choose the large language model for dialogue generation.")
         
             submitted = st.form_submit_button("Generate Podcast Episode")
     
